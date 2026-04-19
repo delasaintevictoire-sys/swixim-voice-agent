@@ -11,6 +11,7 @@ const crypto = require("crypto");
 const { google } = require("googleapis");
 const { DateTime } = require("luxon");
 const OpenAI = require("openai");
+const { Pool } = require("pg");
 
 const app = express();
 app.disable("x-powered-by");
@@ -62,6 +63,9 @@ const GOOGLE_CALENDAR_ID = process.env.GOOGLE_CALENDAR_ID || "primary";
 const APPOINTMENT_DURATION_MINUTES = Number(
   process.env.APPOINTMENT_DURATION_MINUTES || 30
 );
+
+const DATABASE_URL = String(process.env.DATABASE_URL || "").trim();
+const STORAGE_MODE = DATABASE_URL ? "postgres" : "json";
 
 const REQUIRED_PROD_SECRETS = [
   "ADMIN_USER",
@@ -153,6 +157,16 @@ const apimo = axios.create({
   validateStatus: () => true,
 });
 
+const pool = DATABASE_URL
+  ? new Pool({
+      connectionString: DATABASE_URL,
+      ssl:
+        NODE_ENV === "production"
+          ? { rejectUnauthorized: false }
+          : false,
+    })
+  : null;
+
 // ======================================================
 // LOGGING
 // ======================================================
@@ -176,13 +190,6 @@ function safeWriteJson(file, data) {
   fs.renameSync(tmp, file);
 }
 
-function initStorage() {
-  ensureDir(DATA_DIR);
-  if (!fs.existsSync(CONTACTS_FILE)) {
-    safeWriteJson(CONTACTS_FILE, []);
-  }
-}
-
 function readJsonFile(file, fallback) {
   try {
     return JSON.parse(fs.readFileSync(file, "utf-8"));
@@ -195,55 +202,178 @@ function writeJsonFile(file, data) {
   safeWriteJson(file, data);
 }
 
-function readContacts() {
-  return readJsonFile(CONTACTS_FILE, []);
+async function initStorage() {
+  ensureDir(DATA_DIR);
+
+  if (STORAGE_MODE === "json") {
+    if (!fs.existsSync(CONTACTS_FILE)) {
+      safeWriteJson(CONTACTS_FILE, []);
+    }
+
+    businessLog("STORAGE_READY", {
+      mode: "json",
+      count: readJsonFile(CONTACTS_FILE, []).length,
+    });
+    return;
+  }
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS contacts (
+      id TEXT PRIMARY KEY,
+      payload JSONB NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  const countRes = await pool.query(`SELECT COUNT(*)::int AS count FROM contacts`);
+  const currentCount = Number(countRes.rows?.[0]?.count || 0);
+
+  if (currentCount === 0 && fs.existsSync(CONTACTS_FILE)) {
+    const items = readJsonFile(CONTACTS_FILE, []);
+    for (const item of items) {
+      if (!item?.id) continue;
+      const createdAt = item.createdAt || new Date().toISOString();
+      const updatedAt = item.updatedAt || createdAt;
+
+      await pool.query(
+        `
+          INSERT INTO contacts (id, payload, created_at, updated_at)
+          VALUES ($1, $2::jsonb, $3::timestamptz, $4::timestamptz)
+          ON CONFLICT (id) DO NOTHING
+        `,
+        [String(item.id), JSON.stringify(item), createdAt, updatedAt]
+      );
+    }
+  }
+
+  const afterRes = await pool.query(`SELECT COUNT(*)::int AS count FROM contacts`);
+  businessLog("STORAGE_READY", {
+    mode: "postgres",
+    count: Number(afterRes.rows?.[0]?.count || 0),
+  });
 }
 
-function writeContacts(items) {
+async function readContacts() {
+  if (STORAGE_MODE === "json") {
+    return readJsonFile(CONTACTS_FILE, []);
+  }
+
+  const result = await pool.query(
+    `
+      SELECT payload
+      FROM contacts
+      ORDER BY COALESCE(updated_at, created_at) DESC, created_at DESC
+      LIMIT $1
+    `,
+    [MAX_CONTACTS]
+  );
+
+  return result.rows.map((row) => row.payload);
+}
+
+async function writeContacts(items) {
   const next = Array.isArray(items) ? items.slice(0, MAX_CONTACTS) : [];
-  writeJsonFile(CONTACTS_FILE, next);
+
+  if (STORAGE_MODE === "json") {
+    writeJsonFile(CONTACTS_FILE, next);
+    return;
+  }
+
+  await pool.query("BEGIN");
+  try {
+    await pool.query(`TRUNCATE TABLE contacts`);
+
+    for (const item of next) {
+      if (!item?.id) continue;
+      const createdAt = item.createdAt || new Date().toISOString();
+      const updatedAt = item.updatedAt || createdAt;
+
+      await pool.query(
+        `
+          INSERT INTO contacts (id, payload, created_at, updated_at)
+          VALUES ($1, $2::jsonb, $3::timestamptz, $4::timestamptz)
+        `,
+        [String(item.id), JSON.stringify(item), createdAt, updatedAt]
+      );
+    }
+
+    await pool.query("COMMIT");
+  } catch (error) {
+    await pool.query("ROLLBACK");
+    throw error;
+  }
 }
 
-function saveContactEntry(entry) {
-  const items = readContacts();
-  items.unshift(entry);
-  writeContacts(items);
+async function saveContactEntry(entry) {
+  if (!entry?.id) {
+    throw new Error("saveContactEntry: id manquant");
+  }
+
+  if (STORAGE_MODE === "json") {
+    const items = await readContacts();
+    items.unshift(entry);
+    await writeContacts(items);
+    return entry;
+  }
+
+  const createdAt = entry.createdAt || new Date().toISOString();
+  const updatedAt = entry.updatedAt || createdAt;
+
+  await pool.query(
+    `
+      INSERT INTO contacts (id, payload, created_at, updated_at)
+      VALUES ($1, $2::jsonb, $3::timestamptz, $4::timestamptz)
+      ON CONFLICT (id) DO UPDATE
+      SET payload = EXCLUDED.payload,
+          updated_at = EXCLUDED.updated_at
+    `,
+    [String(entry.id), JSON.stringify(entry), createdAt, updatedAt]
+  );
+
+  return entry;
 }
 
-function upsertContactEntryByPredicate(predicate, createOrUpdate) {
-  const items = readContacts();
+async function upsertContactEntryByPredicate(predicate, createOrUpdate) {
+  const items = await readContacts();
   const index = items.findIndex(predicate);
 
   if (index === -1) {
     const created = createOrUpdate(null);
     items.unshift(created);
-    writeContacts(items);
+    await writeContacts(items);
     return created;
   }
 
   items[index] = createOrUpdate(items[index]);
-  writeContacts(items);
+  await writeContacts(items);
   return items[index];
 }
 
-function updateContactEntry(id, updater) {
-  const items = readContacts();
+async function updateContactEntry(id, updater) {
+  const items = await readContacts();
   const index = items.findIndex((item) => item.id === id);
   if (index === -1) return null;
+
   items[index] = updater(items[index]);
-  writeContacts(items);
+  await writeContacts(items);
   return items[index];
 }
 
-function deleteContactEntry(id) {
-  const items = readContacts();
-  const next = items.filter((item) => item.id !== id);
-  if (next.length === items.length) return false;
-  writeContacts(next);
-  return true;
-}
+async function deleteContactEntry(id) {
+  if (!id) return false;
 
-initStorage();
+  if (STORAGE_MODE === "json") {
+    const items = await readContacts();
+    const next = items.filter((item) => item.id !== id);
+    if (next.length === items.length) return false;
+    await writeContacts(next);
+    return true;
+  }
+
+  const result = await pool.query(`DELETE FROM contacts WHERE id = $1`, [String(id)]);
+  return result.rowCount > 0;
+}
 
 // ======================================================
 // SESSIONS
@@ -505,11 +635,16 @@ function validateTwilioWebhook(req) {
 }
 
 function twilioOnly(handler) {
-  return (req, res, next) => {
+  return async (req, res, next) => {
     if (!validateTwilioWebhook(req)) {
       return res.status(403).send("Forbidden");
     }
-    return handler(req, res, next);
+
+    try {
+      return await handler(req, res, next);
+    } catch (error) {
+      return next(error);
+    }
   };
 }
 
@@ -1687,6 +1822,7 @@ app.get("/", (_req, res) => {
       "spoken_message",
       "admin",
       "weather_comment",
+      "postgres_optional_storage",
     ],
   });
 });
@@ -1696,6 +1832,7 @@ app.get("/health", (_req, res) => {
     ok: true,
     env: NODE_ENV,
     timezone: TZ,
+    storageMode: STORAGE_MODE,
     sessions: sessions.size,
     apimo: {
       providerId: APIMO_PROVIDER_ID,
@@ -1850,27 +1987,30 @@ app.get("/properties/latest", async (_req, res, next) => {
 // ======================================================
 // ADMIN
 // ======================================================
-app.get("/admin/json", (req, res) => {
+app.get("/admin/json", async (req, res) => {
   const auth = checkBasicAuth(req);
   if (!auth.ok) {
     res.set("WWW-Authenticate", 'Basic realm="Admin"');
     return res.status(auth.status).send(auth.message);
   }
 
+  const items = await readContacts();
+
   res.json({
-    count: readContacts().length,
-    items: readContacts(),
+    count: items.length,
+    items,
   });
 });
 
-app.get("/admin", (req, res) => {
+app.get("/admin", async (req, res) => {
   const auth = checkBasicAuth(req);
   if (!auth.ok) {
     res.set("WWW-Authenticate", 'Basic realm="Admin"');
     return res.status(auth.status).send(auth.message);
   }
 
-  res.type("html").send(renderAdminPage(readContacts()));
+  const items = await readContacts();
+  res.type("html").send(renderAdminPage(items));
 });
 
 app.get("/admin/audio/:id", async (req, res) => {
@@ -1881,7 +2021,7 @@ app.get("/admin/audio/:id", async (req, res) => {
   }
 
   const id = String(req.params?.id || "");
-  const item = readContacts().find((entry) => entry.id === id);
+  const item = (await readContacts()).find((entry) => entry.id === id);
 
   if (!item) return res.status(404).send("Enregistrement introuvable");
   if (!item.recordingUrl) return res.status(404).send("Aucun audio disponible");
@@ -1898,7 +2038,7 @@ app.get("/admin/audio/:id", async (req, res) => {
   }
 });
 
-app.post("/admin/mark-read", (req, res) => {
+app.post("/admin/mark-read", async (req, res) => {
   const auth = checkBasicAuth(req);
   if (!auth.ok) {
     res.set("WWW-Authenticate", 'Basic realm="Admin"');
@@ -1907,7 +2047,7 @@ app.post("/admin/mark-read", (req, res) => {
 
   const id = String(req.body?.id || "");
   if (id) {
-    updateContactEntry(id, (item) => ({
+    await updateContactEntry(id, (item) => ({
       ...item,
       isRead: !item.isRead,
       updatedAt: new Date().toISOString(),
@@ -1917,7 +2057,7 @@ app.post("/admin/mark-read", (req, res) => {
   res.redirect("/admin");
 });
 
-app.post("/admin/delete", (req, res) => {
+app.post("/admin/delete", async (req, res) => {
   const auth = checkBasicAuth(req);
   if (!auth.ok) {
     res.set("WWW-Authenticate", 'Basic realm="Admin"');
@@ -1925,7 +2065,7 @@ app.post("/admin/delete", (req, res) => {
   }
 
   const id = String(req.body?.id || "");
-  if (id) deleteContactEntry(id);
+  if (id) await deleteContactEntry(id);
 
   res.redirect("/admin");
 });
@@ -1935,7 +2075,7 @@ app.post("/admin/delete", (req, res) => {
 // ======================================================
 app.post(
   "/",
-  twilioOnly((_req, res) => {
+  twilioOnly(async (_req, res) => {
     const response = vr();
     response.redirect({ method: "POST" }, "/voice");
     res.type("text/xml").send(response.toString());
@@ -1944,7 +2084,7 @@ app.post(
 
 app.post(
   "/voice",
-  twilioOnly((req, res) => {
+  twilioOnly(async (req, res) => {
     const callSid = getCallSid(req);
     getSession(callSid);
 
@@ -1970,7 +2110,7 @@ app.post(
 // ======================================================
 app.post(
   "/menu",
-  twilioOnly((_req, res) => {
+  twilioOnly(async (_req, res) => {
     const response = vr();
 
     gatherSpeech(
@@ -1987,7 +2127,7 @@ app.post(
 
 app.post(
   "/menu-retry",
-  twilioOnly((_req, res) => {
+  twilioOnly(async (_req, res) => {
     const response = vr();
 
     gatherSpeech(
@@ -2124,7 +2264,7 @@ app.post(
 
 app.post(
   "/fiche-city-retry",
-  twilioOnly((_req, res) => {
+  twilioOnly(async (_req, res) => {
     const response = vr();
     hangupWithMessage(
       response,
@@ -2174,7 +2314,7 @@ app.post(
 
 app.post(
   "/fiche-ref-retry",
-  twilioOnly((_req, res) => {
+  twilioOnly(async (_req, res) => {
     const response = vr();
     hangupWithMessage(
       response,
@@ -2236,7 +2376,7 @@ app.post(
       source: "twilio_voice",
     };
 
-    saveContactEntry(entry);
+    await saveContactEntry(entry);
 
     try {
       sayFr(response, "Parfait, je retrouve la fiche. Un instant.");
@@ -2263,7 +2403,7 @@ app.post(
       const payload = buildPropertyPayload(property);
       const whatsappLink = generateWhatsAppPrefilledLink(phone, payload.message);
 
-      updateContactEntry(entry.id, (item) => ({
+      await updateContactEntry(entry.id, (item) => ({
         ...item,
         brochure: {
           ...item.brochure,
@@ -2294,7 +2434,7 @@ app.post(
     } catch (error) {
       console.error("Erreur brochure", error);
 
-      updateContactEntry(entry.id, (item) => ({
+      await updateContactEntry(entry.id, (item) => ({
         ...item,
         updatedAt: new Date().toISOString(),
         message: `Erreur fiche: ${error?.message || "Erreur inconnue"}`,
@@ -2314,7 +2454,7 @@ app.post(
 
 app.post(
   "/fiche-phone-retry",
-  twilioOnly((_req, res) => {
+  twilioOnly(async (_req, res) => {
     const response = vr();
     hangupWithMessage(
       response,
@@ -2329,7 +2469,7 @@ app.post(
 // ======================================================
 app.post(
   "/rdv-name",
-  twilioOnly((req, res) => {
+  twilioOnly(async (req, res) => {
     const callSid = getCallSid(req);
     const session = getSession(callSid);
     const raw = String(req.body?.SpeechResult || "").trim();
@@ -2355,7 +2495,7 @@ app.post(
 
 app.post(
   "/rdv-name-retry",
-  twilioOnly((_req, res) => {
+  twilioOnly(async (_req, res) => {
     const response = vr();
     hangupWithMessage(response, "Je n ai pas reçu votre nom. Merci de votre appel. Au revoir.");
     return res.type("text/xml").send(response.toString());
@@ -2364,7 +2504,7 @@ app.post(
 
 app.post(
   "/rdv-phone",
-  twilioOnly((req, res) => {
+  twilioOnly(async (req, res) => {
     const callSid = getCallSid(req);
     const session = getSession(callSid);
     const raw = String(req.body?.SpeechResult || "").trim();
@@ -2394,7 +2534,7 @@ app.post(
 
 app.post(
   "/rdv-phone-retry",
-  twilioOnly((_req, res) => {
+  twilioOnly(async (_req, res) => {
     const response = vr();
     hangupWithMessage(response, "Je n ai pas reçu votre numéro. Merci de votre appel. Au revoir.");
     return res.type("text/xml").send(response.toString());
@@ -2403,7 +2543,7 @@ app.post(
 
 app.post(
   "/rdv-date",
-  twilioOnly((req, res) => {
+  twilioOnly(async (req, res) => {
     const callSid = getCallSid(req);
     const session = getSession(callSid);
     const raw = String(req.body?.SpeechResult || "").trim();
@@ -2435,7 +2575,7 @@ app.post(
 
 app.post(
   "/rdv-date-retry",
-  twilioOnly((_req, res) => {
+  twilioOnly(async (_req, res) => {
     const response = vr();
     hangupWithMessage(response, "Je n ai pas reçu de date valide. Merci de votre appel. Au revoir.");
     return res.type("text/xml").send(response.toString());
@@ -2517,7 +2657,7 @@ app.post(
       session.data.calendarEventId = event.id || "";
       session.data.calendarHtmlLink = event.htmlLink || "";
 
-      saveContactEntry({
+      await saveContactEntry({
         id: crypto.randomUUID(),
         type: "appointment_request",
         callSid,
@@ -2569,7 +2709,7 @@ app.post(
 
 app.post(
   "/rdv-time-retry",
-  twilioOnly((_req, res) => {
+  twilioOnly(async (_req, res) => {
     const response = vr();
     hangupWithMessage(response, "Je n ai pas reçu d heure valide. Merci de votre appel. Au revoir.");
     return res.type("text/xml").send(response.toString());
@@ -2581,7 +2721,7 @@ app.post(
 // ======================================================
 app.post(
   "/msg-type",
-  twilioOnly((req, res) => {
+  twilioOnly(async (req, res) => {
     const callSid = getCallSid(req);
     const session = getSession(callSid);
 
@@ -2623,7 +2763,7 @@ app.post(
 
 app.post(
   "/msg-type-retry",
-  twilioOnly((_req, res) => {
+  twilioOnly(async (_req, res) => {
     const response = vr();
     hangupWithMessage(response, "Je n ai pas reçu votre choix. Merci de votre appel. Au revoir.");
     return res.type("text/xml").send(response.toString());
@@ -2635,7 +2775,7 @@ app.post(
 // ======================================================
 app.post(
   "/msg-voice-name",
-  twilioOnly((req, res) => {
+  twilioOnly(async (req, res) => {
     const callSid = getCallSid(req);
     const session = getSession(callSid);
     const raw = String(req.body?.SpeechResult || "").trim();
@@ -2661,7 +2801,7 @@ app.post(
 
 app.post(
   "/msg-voice-name-retry",
-  twilioOnly((_req, res) => {
+  twilioOnly(async (_req, res) => {
     const response = vr();
     hangupWithMessage(response, "Je n ai pas reçu votre nom. Merci de votre appel. Au revoir.");
     return res.type("text/xml").send(response.toString());
@@ -2670,7 +2810,7 @@ app.post(
 
 app.post(
   "/msg-voice-phone",
-  twilioOnly((req, res) => {
+  twilioOnly(async (req, res) => {
     const callSid = getCallSid(req);
     const session = getSession(callSid);
     const raw = String(req.body?.SpeechResult || "").trim();
@@ -2691,7 +2831,7 @@ app.post(
     const pendingId = crypto.randomUUID();
     session.data.pendingVoiceMessageId = pendingId;
 
-    saveContactEntry({
+    await saveContactEntry({
       id: pendingId,
       type: "voice_message",
       callSid,
@@ -2745,7 +2885,7 @@ app.post(
 
 app.post(
   "/msg-voice-phone-retry",
-  twilioOnly((_req, res) => {
+  twilioOnly(async (_req, res) => {
     const response = vr();
     hangupWithMessage(response, "Je n ai pas reçu votre numéro. Merci de votre appel. Au revoir.");
     return res.type("text/xml").send(response.toString());
@@ -2754,7 +2894,7 @@ app.post(
 
 app.post(
   "/msg-voice-done",
-  twilioOnly((req, res) => {
+  twilioOnly(async (req, res) => {
     const callSid = getCallSid(req);
     const response = vr();
 
@@ -2777,7 +2917,7 @@ app.post(
 
 app.post(
   "/recording-status",
-  twilioOnly((req, res) => {
+  twilioOnly(async (req, res) => {
     const callSid = req.body?.CallSid || "unknown";
     const session = sessions.get(callSid);
     const recordingSid = String(req.body?.RecordingSid || "");
@@ -2785,7 +2925,7 @@ app.post(
     const pendingId = session?.data?.pendingVoiceMessageId;
 
     if (pendingId) {
-      updateContactEntry(pendingId, (item) => ({
+      await updateContactEntry(pendingId, (item) => ({
         ...item,
         recordingSid,
         recordingUrl,
@@ -2794,7 +2934,7 @@ app.post(
         updatedAt: new Date().toISOString(),
       }));
     } else {
-      upsertContactEntryByPredicate(
+      await upsertContactEntryByPredicate(
         (item) => item.recordingSid && item.recordingSid === recordingSid,
         (existing) => ({
           id: existing?.id || crypto.randomUUID(),
@@ -2841,7 +2981,7 @@ app.post(
 // ======================================================
 app.post(
   "/msg-name",
-  twilioOnly((req, res) => {
+  twilioOnly(async (req, res) => {
     const callSid = getCallSid(req);
     const session = getSession(callSid);
     const raw = String(req.body?.SpeechResult || "").trim();
@@ -2867,7 +3007,7 @@ app.post(
 
 app.post(
   "/msg-name-retry",
-  twilioOnly((_req, res) => {
+  twilioOnly(async (_req, res) => {
     const response = vr();
     hangupWithMessage(response, "Je n ai pas reçu votre nom. Merci de votre appel. Au revoir.");
     return res.type("text/xml").send(response.toString());
@@ -2876,7 +3016,7 @@ app.post(
 
 app.post(
   "/msg-phone",
-  twilioOnly((req, res) => {
+  twilioOnly(async (req, res) => {
     const callSid = getCallSid(req);
     const session = getSession(callSid);
     const raw = String(req.body?.SpeechResult || "").trim();
@@ -2902,7 +3042,7 @@ app.post(
 
 app.post(
   "/msg-phone-retry",
-  twilioOnly((_req, res) => {
+  twilioOnly(async (_req, res) => {
     const response = vr();
     hangupWithMessage(response, "Je n ai pas reçu votre numéro. Merci de votre appel. Au revoir.");
     return res.type("text/xml").send(response.toString());
@@ -2911,7 +3051,7 @@ app.post(
 
 app.post(
   "/msg-body",
-  twilioOnly((req, res) => {
+  twilioOnly(async (req, res) => {
     const callSid = getCallSid(req);
     const session = getSession(callSid);
     const raw = String(req.body?.SpeechResult || "").trim();
@@ -2929,7 +3069,7 @@ app.post(
 
     session.data.message = raw;
 
-    saveContactEntry({
+    await saveContactEntry({
       id: crypto.randomUUID(),
       type: "spoken_message",
       callSid,
@@ -2971,7 +3111,7 @@ app.post(
 
 app.post(
   "/msg-body-retry",
-  twilioOnly((_req, res) => {
+  twilioOnly(async (_req, res) => {
     const response = vr();
     hangupWithMessage(response, "Je n ai pas reçu votre message. Merci de votre appel. Au revoir.");
     return res.type("text/xml").send(response.toString());
@@ -2983,7 +3123,7 @@ app.post(
 // ======================================================
 app.post(
   "/goodbye",
-  twilioOnly((_req, res) => {
+  twilioOnly(async (_req, res) => {
     const response = vr();
     hangupWithMessage(response, "Merci de votre appel. Au revoir.");
     res.type("text/xml").send(response.toString());
@@ -3030,15 +3170,25 @@ console.log("APIMO agency:", APIMO_AGENCY_ID);
 console.log("APIMO base url:", APIMO_BASE_URL);
 console.log("OPENWEATHER enabled:", Boolean(OPENWEATHER_API_KEY));
 
-app.listen(PORT, "0.0.0.0", () => {
-  businessLog("SERVER_STARTED", {
-    port: PORT,
-    env: NODE_ENV,
-    timezone: TZ,
-    appBaseUrl: APP_BASE_URL,
-    apimoCacheTtlMs: APIMO_CACHE_TTL_MS,
-    weatherCacheTtlMs: WEATHER_CACHE_TTL_MS,
-    appointmentDurationMinutes: APPOINTMENT_DURATION_MINUTES,
-    twilioValidateSignature: TWILIO_VALIDATE_SIGNATURE,
+async function startServer() {
+  await initStorage();
+
+  app.listen(PORT, "0.0.0.0", () => {
+    businessLog("SERVER_STARTED", {
+      port: PORT,
+      env: NODE_ENV,
+      timezone: TZ,
+      appBaseUrl: APP_BASE_URL,
+      apimoCacheTtlMs: APIMO_CACHE_TTL_MS,
+      weatherCacheTtlMs: WEATHER_CACHE_TTL_MS,
+      appointmentDurationMinutes: APPOINTMENT_DURATION_MINUTES,
+      twilioValidateSignature: TWILIO_VALIDATE_SIGNATURE,
+      storageMode: STORAGE_MODE,
+    });
   });
+}
+
+startServer().catch((error) => {
+  console.error("STARTUP_ERROR", error);
+  process.exit(1);
 });
