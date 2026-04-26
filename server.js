@@ -2096,7 +2096,7 @@ app.post(
     const response = vr();
     sayFr(
       response,
-      "Bonjour et bienvenue chez Swixim. Je suis Léa, votre agent digitale."
+      "Bonjour, vous êtes bien chez Swixim. Je suis Léa, je vais m’occuper de vous."
     );
     response.pause({ length: 1 });
     response.redirect({ method: "POST" }, "/menu");
@@ -2116,7 +2116,7 @@ app.post(
     gatherSpeech(
       response,
       "/intent",
-      "Je peux vous aider pour trois besoins. Prendre un rendez vous téléphonique, laisser un message au conseiller, ou recevoir une fiche descriptive du bien. Dites par exemple rendez vous, message, ou fiche descriptive.",
+      "Je vais vous aider rapidement. Dites-moi simplement ce que vous souhaitez faire : prendre un rendez-vous, laisser un message à un conseiller, ou recevoir les informations d’un bien.",
       "rendez vous telephonique, rendez vous, rdv, message au conseiller, fiche descriptive, descriptif, description"
     );
 
@@ -2133,7 +2133,7 @@ app.post(
     gatherSpeech(
       response,
       "/intent",
-      "Je n ai pas bien entendu. Dites rendez vous téléphonique, message au conseiller, ou fiche descriptive.",
+      "Désolée, j’ai un petit doute. Vous pouvez me redire ? Rendez-vous, message, ou fiche du bien.",
       "rendez vous telephonique, rdv, message au conseiller, fiche descriptive"
     );
 
@@ -2168,7 +2168,7 @@ app.post(
       gatherSpeech(
         response,
         "/fiche-city",
-        "Très bien. Pour quelle ville souhaitez vous la fiche ?",
+        "Parfait. Dites-moi dans quelle ville se trouve le bien.",
         "strasbourg, mulhouse, guemar, hoerdt, wolfisheim, cernay, erstein, bischheim"
       );
       response.redirect({ method: "POST" }, "/fiche-city-retry");
@@ -2182,7 +2182,7 @@ app.post(
       gatherSpeech(
         response,
         "/msg-type",
-        "D accord. Souhaitez vous laisser un message vocal, ou dicter un message ? Dites message vocal, ou message dicté.",
+        "Très bien. Vous préférez laisser un message vocal, ou me dicter votre message ?",
         "message vocal, vocal, message dicté, dicter"
       );
       response.redirect({ method: "POST" }, "/msg-type-retry");
@@ -2196,7 +2196,7 @@ app.post(
       gatherSpeech(
         response,
         "/rdv-name",
-        "Très bien. Quel est votre nom et prénom ?",
+        "Je vais vous organiser ça. Comment vous vous appelez ?",
         "nom, prénom"
       );
       response.redirect({ method: "POST" }, "/rdv-name-retry");
@@ -2217,7 +2217,7 @@ app.post(
     gatherSpeech(
       response,
       "/intent",
-      "Je n ai pas compris. Dites rendez vous téléphonique, message au conseiller, ou fiche descriptive.",
+      "Désolée, je n’ai pas bien compris. Vous pouvez me redire simplement : rendez-vous, message, ou fiche du bien ?",
       "rendez vous telephonique, rdv, message au conseiller, fiche descriptive"
     );
     response.redirect({ method: "POST" }, "/goodbye");
@@ -2254,7 +2254,7 @@ app.post(
     gatherSpeech(
       response,
       "/fiche-ref",
-      `Très bien. Pour ${city}, dites maintenant la référence du bien. Vous pouvez dire les 4 premiers chiffres, ou toute la référence.`,
+      `Très bien. Donnez-moi simplement la référence du bien, même partielle, je vais retrouver ça.`,
       "zero, un, deux, trois, quatre, cinq, six, sept, huit, neuf"
     );
     response.redirect({ method: "POST" }, "/fiche-ref-retry");
@@ -2268,7 +2268,7 @@ app.post(
     const response = vr();
     hangupWithMessage(
       response,
-      "Je n ai pas reçu de ville valide. Merci de votre appel. Au revoir."
+      "Je n ai pas reçu de ville valide. Merci pour votre appel, à très bientôt."
     );
     return res.type("text/xml").send(response.toString());
   })
@@ -2305,7 +2305,7 @@ app.post(
     gatherSpeech(
       response,
       "/fiche-phone",
-      `Très bien. J ai noté la ville ${session.data.city} et la référence ${spellDigitsForSpeech(parsed.digits)}. Quel numéro de téléphone souhaitez vous utiliser pour recevoir la fiche sur WhatsApp ?`
+      `Parfait, j’ai noté la ville ${session.data.city} et la référence ${spellDigitsForSpeech(parsed.digits)}. Sur quel numéro je peux vous envoyer les informations sur WhatsApp ?`
     );
     response.redirect({ method: "POST" }, "/fiche-phone-retry");
     return res.type("text/xml").send(response.toString());
@@ -2318,7 +2318,7 @@ app.post(
     const response = vr();
     hangupWithMessage(
       response,
-      "Je n ai pas reçu de référence valide. Merci de votre appel. Au revoir."
+      "Je n ai pas reçu de référence valide. Merci pour votre appel, à très bientôt."
     );
     return res.type("text/xml").send(response.toString());
   })
@@ -2336,7 +2336,7 @@ app.post(
       gatherSpeech(
         response,
         "/fiche-phone",
-        "Je n ai pas bien compris le numéro. Répétez uniquement votre numéro de téléphone."
+        "Désolée, je n’ai pas bien compris le numéro. Vous pouvez me le répéter doucement ?"
       );
       response.redirect({ method: "POST" }, "/fiche-phone-retry");
       return res.type("text/xml").send(response.toString());
@@ -2379,7 +2379,7 @@ app.post(
     await saveContactEntry(entry);
 
     try {
-      sayFr(response, "Parfait, je retrouve la fiche. Un instant.");
+      sayFr(response, "Parfait, je regarde ça pour vous. Un instant.");
 
       const weatherComment = await getWeatherComment(session.data.city);
       if (weatherComment) {
@@ -2425,7 +2425,7 @@ app.post(
 
       sayFr(
         response,
-        "C est bon. Votre demande de fiche a été enregistrée. Le lien WhatsApp est prêt pour ce numéro. Merci de votre appel. Au revoir."
+        "Parfait, j’ai tout ce qu’il faut. Je vous envoie les informations du bien directement sur WhatsApp. Si besoin, un conseiller pourra aussi vous recontacter. Merci pour votre appel, à très bientôt."
       );
       response.hangup();
 
@@ -2442,7 +2442,7 @@ app.post(
 
       sayFr(
         response,
-        "Votre demande de fiche descriptive a bien été enregistrée, mais je n ai pas pu finaliser la recherche automatiquement. Un conseiller vous recontactera rapidement. Merci de votre appel. Au revoir."
+        "J’ai bien enregistré votre demande. Je rencontre juste un souci pour retrouver automatiquement la fiche. Un conseiller va reprendre la demande et vous recontacter rapidement. Merci pour votre appel, à très bientôt."
       );
       response.hangup();
 
@@ -2458,7 +2458,7 @@ app.post(
     const response = vr();
     hangupWithMessage(
       response,
-      "Je n ai pas reçu de numéro. Merci de votre appel. Au revoir."
+      "Je n ai pas reçu de numéro. Merci pour votre appel, à très bientôt."
     );
     return res.type("text/xml").send(response.toString());
   })
@@ -2479,7 +2479,7 @@ app.post(
       gatherSpeech(
         response,
         "/rdv-name",
-        "Je n ai pas bien entendu. Répétez votre nom et prénom."
+        "Désolée, j’ai mal entendu. Vous pouvez me redire votre nom et prénom ?"
       );
       response.redirect({ method: "POST" }, "/rdv-name-retry");
       return res.type("text/xml").send(response.toString());
@@ -2487,7 +2487,7 @@ app.post(
 
     session.data.name = raw;
 
-    gatherSpeech(response, "/rdv-phone", "Merci. Quel est votre numéro de téléphone ?");
+    gatherSpeech(response, "/rdv-phone", "Parfait. Sur quel numéro le conseiller pourra vous rappeler ?");
     response.redirect({ method: "POST" }, "/rdv-phone-retry");
     return res.type("text/xml").send(response.toString());
   })
@@ -2497,7 +2497,7 @@ app.post(
   "/rdv-name-retry",
   twilioOnly(async (_req, res) => {
     const response = vr();
-    hangupWithMessage(response, "Je n ai pas reçu votre nom. Merci de votre appel. Au revoir.");
+    hangupWithMessage(response, "Je n ai pas reçu votre nom. Merci pour votre appel, à très bientôt.");
     return res.type("text/xml").send(response.toString());
   })
 );
@@ -2514,7 +2514,7 @@ app.post(
       gatherSpeech(
         response,
         "/rdv-phone",
-        "Je n ai pas bien compris le numéro. Répétez uniquement votre numéro de téléphone."
+        "Désolée, je n’ai pas bien compris le numéro. Vous pouvez me le répéter doucement ?"
       );
       response.redirect({ method: "POST" }, "/rdv-phone-retry");
       return res.type("text/xml").send(response.toString());
@@ -2525,7 +2525,7 @@ app.post(
     gatherSpeech(
       response,
       "/rdv-date",
-      "Très bien. Quelle date souhaitez vous ? Dites par exemple vingt huit mars deux mille vingt six, ou demain."
+      "Très bien. Quel jour vous arrangerait pour être rappelé ? Vous pouvez dire par exemple demain, ou une date précise."
     );
     response.redirect({ method: "POST" }, "/rdv-date-retry");
     return res.type("text/xml").send(response.toString());
@@ -2536,7 +2536,7 @@ app.post(
   "/rdv-phone-retry",
   twilioOnly(async (_req, res) => {
     const response = vr();
-    hangupWithMessage(response, "Je n ai pas reçu votre numéro. Merci de votre appel. Au revoir.");
+    hangupWithMessage(response, "Je n ai pas reçu votre numéro. Merci pour votre appel, à très bientôt.");
     return res.type("text/xml").send(response.toString());
   })
 );
@@ -2555,7 +2555,7 @@ app.post(
       gatherSpeech(
         response,
         "/rdv-date",
-        "Je n ai pas bien compris la date. Répétez par exemple vingt huit mars deux mille vingt six, ou demain."
+        "Désolée, je n’ai pas bien compris la date. Vous pouvez me redire le jour souhaité ?"
       );
       response.redirect({ method: "POST" }, "/rdv-date-retry");
       return res.type("text/xml").send(response.toString());
@@ -2566,7 +2566,7 @@ app.post(
     gatherSpeech(
       response,
       "/rdv-time",
-      "Merci. Quelle heure souhaitez vous ? Dites par exemple quatorze heures, quatorze heures trente, ou quatorze trente."
+      "Très bien. Et à quelle heure environ ? Par exemple quatorze heures, ou quatorze heures trente."
     );
     response.redirect({ method: "POST" }, "/rdv-time-retry");
     return res.type("text/xml").send(response.toString());
@@ -2577,7 +2577,7 @@ app.post(
   "/rdv-date-retry",
   twilioOnly(async (_req, res) => {
     const response = vr();
-    hangupWithMessage(response, "Je n ai pas reçu de date valide. Merci de votre appel. Au revoir.");
+    hangupWithMessage(response, "Je n ai pas reçu de date valide. Merci pour votre appel, à très bientôt.");
     return res.type("text/xml").send(response.toString());
   })
 );
@@ -2596,7 +2596,7 @@ app.post(
       gatherSpeech(
         response,
         "/rdv-time",
-        "Je n ai pas bien compris l heure. Répétez par exemple quatorze heures, quatorze heures trente, ou quatorze trente."
+        "Désolée, je n’ai pas bien compris l’heure. Vous pouvez me la redire, par exemple quatorze heures ou quatorze heures trente ?"
       );
       response.redirect({ method: "POST" }, "/rdv-time-retry");
       return res.type("text/xml").send(response.toString());
@@ -2632,7 +2632,7 @@ app.post(
           gatherSpeech(
             response,
             "/rdv-time",
-            `Ce créneau est déjà pris. Je peux vous proposer ${alternatives.join(", ")}. Merci de dire l heure choisie pour cette même date.`
+            `Ce créneau est déjà pris. En revanche, je peux vous proposer ${alternatives.join(", ")}. Dites-moi simplement l’heure qui vous convient le mieux pour cette même date.`
           );
           response.redirect({ method: "POST" }, "/rdv-time-retry");
           return res.type("text/xml").send(response.toString());
@@ -2641,7 +2641,7 @@ app.post(
         gatherSpeech(
           response,
           "/rdv-time",
-          "Ce créneau est déjà pris. Je n ai pas trouvé d autre disponibilité proche pour cette date. Merci de proposer une autre heure."
+          "Ce créneau est déjà pris. Je n’ai pas trouvé d’autre disponibilité proche pour cette date. Proposez-moi une autre heure, et je vérifie."
         );
         response.redirect({ method: "POST" }, "/rdv-time-retry");
         return res.type("text/xml").send(response.toString());
@@ -2690,7 +2690,7 @@ app.post(
 
       hangupWithMessage(
         response,
-        "Parfait. Votre rendez vous téléphonique a bien été enregistré dans l agenda. Merci de votre appel. Au revoir."
+        "C’est parfait, c’est noté. Un conseiller va vous rappeler au créneau prévu. Merci pour votre appel, et à très bientôt."
       );
       resetSession(callSid);
       return res.type("text/xml").send(response.toString());
@@ -2699,7 +2699,7 @@ app.post(
 
       hangupWithMessage(
         response,
-        "Votre demande a bien été prise en compte, mais je rencontre un problème pour l enregistrer dans l agenda. Un conseiller vous recontactera rapidement. Merci de votre appel. Au revoir."
+        "J’ai bien pris votre demande en compte. Je rencontre juste un souci pour l’inscrire automatiquement dans l’agenda. Un conseiller vous recontactera rapidement. Merci pour votre appel."
       );
       resetSession(callSid);
       return res.type("text/xml").send(response.toString());
@@ -2711,7 +2711,7 @@ app.post(
   "/rdv-time-retry",
   twilioOnly(async (_req, res) => {
     const response = vr();
-    hangupWithMessage(response, "Je n ai pas reçu d heure valide. Merci de votre appel. Au revoir.");
+    hangupWithMessage(response, "Je n ai pas reçu d heure valide. Merci pour votre appel, à très bientôt.");
     return res.type("text/xml").send(response.toString());
   })
 );
@@ -2732,7 +2732,7 @@ app.post(
     if (text.includes("vocal")) {
       session.data.messageMode = "voice";
 
-      gatherSpeech(response, "/msg-voice-name", "Très bien. Quel est votre nom et prénom ?");
+      gatherSpeech(response, "/msg-voice-name", "Je vais vous organiser ça. Comment vous vous appelez ?");
       response.redirect({ method: "POST" }, "/msg-voice-name-retry");
       return res.type("text/xml").send(response.toString());
     }
@@ -2745,7 +2745,7 @@ app.post(
     ) {
       session.data.messageMode = "spoken";
 
-      gatherSpeech(response, "/msg-name", "D accord. Quel est votre nom et prénom ?");
+      gatherSpeech(response, "/msg-name", "Très bien. Comment vous vous appelez ?");
       response.redirect({ method: "POST" }, "/msg-name-retry");
       return res.type("text/xml").send(response.toString());
     }
@@ -2765,7 +2765,7 @@ app.post(
   "/msg-type-retry",
   twilioOnly(async (_req, res) => {
     const response = vr();
-    hangupWithMessage(response, "Je n ai pas reçu votre choix. Merci de votre appel. Au revoir.");
+    hangupWithMessage(response, "Je n ai pas reçu votre choix. Merci pour votre appel, à très bientôt.");
     return res.type("text/xml").send(response.toString());
   })
 );
@@ -2785,7 +2785,7 @@ app.post(
       gatherSpeech(
         response,
         "/msg-voice-name",
-        "Je n ai pas bien entendu. Répétez votre nom et prénom."
+        "Désolée, j’ai mal entendu. Vous pouvez me redire votre nom et prénom ?"
       );
       response.redirect({ method: "POST" }, "/msg-voice-name-retry");
       return res.type("text/xml").send(response.toString());
@@ -2793,7 +2793,7 @@ app.post(
 
     session.data.name = raw;
 
-    gatherSpeech(response, "/msg-voice-phone", "Merci. Quel est votre numéro de téléphone ?");
+    gatherSpeech(response, "/msg-voice-phone", "Parfait. Sur quel numéro le conseiller pourra vous rappeler ?");
     response.redirect({ method: "POST" }, "/msg-voice-phone-retry");
     return res.type("text/xml").send(response.toString());
   })
@@ -2803,7 +2803,7 @@ app.post(
   "/msg-voice-name-retry",
   twilioOnly(async (_req, res) => {
     const response = vr();
-    hangupWithMessage(response, "Je n ai pas reçu votre nom. Merci de votre appel. Au revoir.");
+    hangupWithMessage(response, "Je n ai pas reçu votre nom. Merci pour votre appel, à très bientôt.");
     return res.type("text/xml").send(response.toString());
   })
 );
@@ -2820,7 +2820,7 @@ app.post(
       gatherSpeech(
         response,
         "/msg-voice-phone",
-        "Je n ai pas bien compris le numéro. Répétez uniquement votre numéro de téléphone."
+        "Désolée, je n’ai pas bien compris le numéro. Vous pouvez me le répéter doucement ?"
       );
       response.redirect({ method: "POST" }, "/msg-voice-phone-retry");
       return res.type("text/xml").send(response.toString());
@@ -2864,7 +2864,7 @@ app.post(
 
     sayFr(
       response,
-      "Très bien. Après le bip, vous pouvez laisser votre message vocal. Quand vous avez terminé, raccrochez ou appuyez sur la touche dièse."
+      "Parfait. Après le bip, laissez votre message tranquillement. Quand vous avez terminé, vous pouvez raccrocher ou appuyer sur la touche dièse."
     );
 
     response.record({
@@ -2887,7 +2887,7 @@ app.post(
   "/msg-voice-phone-retry",
   twilioOnly(async (_req, res) => {
     const response = vr();
-    hangupWithMessage(response, "Je n ai pas reçu votre numéro. Merci de votre appel. Au revoir.");
+    hangupWithMessage(response, "Je n ai pas reçu votre numéro. Merci pour votre appel, à très bientôt.");
     return res.type("text/xml").send(response.toString());
   })
 );
@@ -2908,7 +2908,7 @@ app.post(
 
     hangupWithMessage(
       response,
-      "Parfait. Votre message vocal a bien été enregistré. Merci de votre appel. Au revoir."
+      "Parfait, votre message a bien été enregistré. Un conseiller va l’écouter rapidement et revenir vers vous. Merci pour votre appel."
     );
 
     return res.type("text/xml").send(response.toString());
@@ -2991,7 +2991,7 @@ app.post(
       gatherSpeech(
         response,
         "/msg-name",
-        "Je n ai pas bien entendu. Répétez votre nom et prénom."
+        "Désolée, j’ai mal entendu. Vous pouvez me redire votre nom et prénom ?"
       );
       response.redirect({ method: "POST" }, "/msg-name-retry");
       return res.type("text/xml").send(response.toString());
@@ -2999,7 +2999,7 @@ app.post(
 
     session.data.name = raw;
 
-    gatherSpeech(response, "/msg-phone", "Quel est votre numéro de téléphone ?");
+    gatherSpeech(response, "/msg-phone", "Sur quel numéro le conseiller pourra vous rappeler ?");
     response.redirect({ method: "POST" }, "/msg-phone-retry");
     return res.type("text/xml").send(response.toString());
   })
@@ -3009,7 +3009,7 @@ app.post(
   "/msg-name-retry",
   twilioOnly(async (_req, res) => {
     const response = vr();
-    hangupWithMessage(response, "Je n ai pas reçu votre nom. Merci de votre appel. Au revoir.");
+    hangupWithMessage(response, "Je n ai pas reçu votre nom. Merci pour votre appel, à très bientôt.");
     return res.type("text/xml").send(response.toString());
   })
 );
@@ -3026,7 +3026,7 @@ app.post(
       gatherSpeech(
         response,
         "/msg-phone",
-        "Je n ai pas bien compris le numéro. Répétez uniquement votre numéro de téléphone."
+        "Désolée, je n’ai pas bien compris le numéro. Vous pouvez me le répéter doucement ?"
       );
       response.redirect({ method: "POST" }, "/msg-phone-retry");
       return res.type("text/xml").send(response.toString());
@@ -3034,7 +3034,7 @@ app.post(
 
     session.data.phone = normalizeFrenchPhone(raw);
 
-    gatherSpeech(response, "/msg-body", "Quel message souhaitez vous laisser ?");
+    gatherSpeech(response, "/msg-body", "Très bien. Quel message souhaitez-vous laisser au conseiller ?");
     response.redirect({ method: "POST" }, "/msg-body-retry");
     return res.type("text/xml").send(response.toString());
   })
@@ -3044,7 +3044,7 @@ app.post(
   "/msg-phone-retry",
   twilioOnly(async (_req, res) => {
     const response = vr();
-    hangupWithMessage(response, "Je n ai pas reçu votre numéro. Merci de votre appel. Au revoir.");
+    hangupWithMessage(response, "Je n ai pas reçu votre numéro. Merci pour votre appel, à très bientôt.");
     return res.type("text/xml").send(response.toString());
   })
 );
@@ -3102,7 +3102,7 @@ app.post(
 
     hangupWithMessage(
       response,
-      "Parfait. Votre message pour le conseiller a bien été enregistré. Merci de votre appel. Au revoir."
+      "C’est parfait, j’ai bien noté votre message. Un conseiller va le recevoir et vous recontacter rapidement. Merci pour votre appel."
     );
     resetSession(callSid);
     return res.type("text/xml").send(response.toString());
@@ -3113,7 +3113,7 @@ app.post(
   "/msg-body-retry",
   twilioOnly(async (_req, res) => {
     const response = vr();
-    hangupWithMessage(response, "Je n ai pas reçu votre message. Merci de votre appel. Au revoir.");
+    hangupWithMessage(response, "Je n ai pas reçu votre message. Merci pour votre appel, à très bientôt.");
     return res.type("text/xml").send(response.toString());
   })
 );
@@ -3125,7 +3125,7 @@ app.post(
   "/goodbye",
   twilioOnly(async (_req, res) => {
     const response = vr();
-    hangupWithMessage(response, "Merci de votre appel. Au revoir.");
+    hangupWithMessage(response, "Merci pour votre appel, à très bientôt.");
     res.type("text/xml").send(response.toString());
   })
 );
